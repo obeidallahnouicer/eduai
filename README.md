@@ -877,6 +877,3 @@ tests/
 
 ---
 
-## License
-
-MIT — see `LICENSE` for details.
