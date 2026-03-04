@@ -1,0 +1,88 @@
+# =============================================================================
+# StudyOS Backend — docker-compose.yml
+# Starts: api, postgres, redis
+# =============================================================================
+
+version: "3.11"
+
+services:
+  # ---------------------------------------------------------------------------
+  # FastAPI application
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://studyos:studyos@postgres:5432/studyos
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Alembic migration runner (runs once, then exits)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      target: runtime
+    command: alembic upgrade head
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://studyos:studyos@postgres:5432/studyos
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: studyos
+      POSTGRES_PASSWORD: studyos
+      POSTGRES_DB: studyos
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studyos -d studyos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis 7
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
