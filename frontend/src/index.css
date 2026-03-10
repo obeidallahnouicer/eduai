@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-vs-bg text-vs-text font-sans text-sm;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-vs-bg;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-vs-border rounded;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-vs-muted;
+  }
+
+  ::selection {
+    @apply bg-vs-primary/30 text-vs-bright;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded
+           border transition-colors duration-100 cursor-pointer select-none;
+  }
+  .btn-primary {
+    @apply btn bg-vs-primary/10 border-vs-primary/40 text-vs-primary
+           hover:bg-vs-primary/20 hover:border-vs-primary/60;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent border-vs-border text-vs-text
+           hover:bg-vs-surface hover:border-vs-muted/50;
+  }
+  .btn-danger {
+    @apply btn bg-vs-danger/10 border-vs-danger/40 text-vs-danger
+           hover:bg-vs-danger/20 hover:border-vs-danger/60;
+  }
+  .btn-success {
+    @apply btn bg-vs-success/10 border-vs-success/40 text-vs-success
+           hover:bg-vs-success/20 hover:border-vs-success/60;
+  }
+
+  .input {
+    @apply w-full px-3 py-1.5 bg-vs-bg border border-vs-border rounded
+           text-vs-text text-sm placeholder-vs-muted
+           focus:outline-none focus:border-vs-primary/70 focus:ring-1 focus:ring-vs-primary/30
+           transition-colors duration-100;
+  }
+
+  .label {
+    @apply block text-xs font-medium text-vs-muted mb-1;
+  }
+
+  .card {
+    @apply bg-vs-surface border border-vs-border rounded-lg;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-1.5 py-0.5 text-2xs font-medium rounded border;
+  }
+  .badge-blue  { @apply badge bg-vs-primary/10 border-vs-primary/30 text-vs-primary; }
+  .badge-green { @apply badge bg-vs-success/10 border-vs-success/30 text-vs-success; }
+  .badge-red   { @apply badge bg-vs-danger/10 border-vs-danger/30 text-vs-danger; }
+  .badge-gray  { @apply badge bg-vs-border/40 border-vs-border text-vs-muted; }
+
+  .divider {
+    @apply border-t border-vs-border;
+  }
+
+  .page-title {
+    @apply text-base font-semibold text-vs-bright;
+  }
+
+  .section-label {
+    @apply text-xs font-medium text-vs-muted uppercase tracking-wider;
+  }
+}
