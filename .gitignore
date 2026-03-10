@@ -46,3 +46,25 @@ uploads/*
 
 # Docker
 *.log
+
+# Frontend — Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Frontend — environment
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# npm / pnpm / yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+
+# TypeScript build cache
+*.tsbuildinfo
