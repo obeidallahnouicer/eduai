@@ -1,69 +1,62 @@
+<!--
+Copilot Task:
+Upgrade this README into a professional engineering documentation page.
+Include architecture diagrams (Mermaid), system flow, design patterns, and clear technical explanations.
+-->
+
 # StudyOS — AI-Powered Spaced Repetition Platform
 
-> **StudyOS** is a production-ready, async FastAPI backend that turns any document (PDF or text) into a personalised flashcard study system. Upload study material → the platform uses an LLM to generate flashcards → a SuperMemo-2 (SM-2) algorithm schedules reviews → a WebSocket-driven live session delivers cards in real time → mastery scores track progress per topic.
+**StudyOS** is a production-ready, async FastAPI backend that transforms any document (PDF or plain text) into a personalised flashcard study system. An LLM generates flashcards from uploaded content, a SuperMemo-2 (SM-2) algorithm schedules reviews based on recall performance, and a WebSocket-driven live session delivers cards in real time while mastery scores track progress per topic.
 
 ---
 
-## Table of Contents
+# Table of Contents
 
-1. [Feature Overview](#feature-overview)
-2. [Tech Stack](#tech-stack)
-3. [Architecture Overview](#architecture-overview)
-4. [Directory Structure](#directory-structure)
-5. [Domain Model (ERD)](#domain-model-erd)
-6. [API Reference](#api-reference)
-7. [Request / Response Flow](#request--response-flow)
-8. [AI Pipeline](#ai-pipeline)
-9. [Spaced Repetition (SM-2)](#spaced-repetition-sm-2)
-10. [WebSocket Study Session](#websocket-study-session)
-11. [Security Model](#security-model)
-12. [Configuration Reference](#configuration-reference)
-13. [Database Migrations](#database-migrations)
-14. [Docker & Deployment](#docker--deployment)
-15. [Development Setup](#development-setup)
-16. [Error Handling Strategy](#error-handling-strategy)
-17. [Testing](#testing)
+1. [System Overview](#system-overview)
+2. [Architecture](#architecture)
+3. [Data Flow / Processing Pipeline](#data-flow--processing-pipeline)
+4. [Project Structure](#project-structure)
+5. [Design Decisions](#design-decisions)
+6. [Design Patterns Used](#design-patterns-used)
+7. [Tech Stack](#tech-stack)
+8. [Installation](#installation)
+9. [Usage](#usage)
+10. [API Reference](#api-reference)
+11. [Domain Model (ERD)](#domain-model-erd)
+12. [Spaced Repetition (SM-2)](#spaced-repetition-sm-2)
+13. [WebSocket Study Session](#websocket-study-session)
+14. [Security Model](#security-model)
+15. [Configuration Reference](#configuration-reference)
+16. [Database Migrations](#database-migrations)
+17. [Error Handling](#error-handling)
+18. [Testing](#testing)
+19. [Future Improvements](#future-improvements)
 
 ---
 
-## Feature Overview
+# System Overview
 
-| Feature | Details |
+StudyOS solves the problem of passive learning from documents. Users upload study material and the platform automates the full active-recall workflow:
+
+| Stage | What Happens |
 |---|---|
-| **User Auth** | Register / Login / Refresh with JWT (access + refresh tokens), bcrypt passwords |
-| **Courses** | Full CRUD; every resource is scoped to its owning user |
-| **Content Ingestion** | Upload PDF or plain-text files (≤ 50 MB); SHA-256 dedup; async local storage |
-| **AI Flashcard Generation** | NVIDIA NIM (OpenAI-compatible) LLM with Redis-cached results; streaming response |
-| **Manual Flashcards** | Create, patch, archive, and delete cards; difficulty 1–5 |
-| **Study Sessions** | REST to open a session, WebSocket to drive the live review loop |
-| **SM-2 Scheduling** | Stateless, pure-Python implementation of the SuperMemo-2 algorithm |
-| **Card Reviews** | Submit a rating (again/hard/good/easy); next review date computed and persisted |
-| **Mastery Scores** | Per-topic aggregated score recomputed on demand from review history |
-| **CORS** | Configurable allowed-origins list |
-| **OpenAPI Docs** | Auto-generated Swagger UI (`/api/docs`) and ReDoc (`/api/redoc`) |
+| **Ingest** | User uploads a PDF or text file (≤ 50 MB); file is stored locally and deduplicated via SHA-256 |
+| **Generate** | An LLM (NVIDIA NIM, OpenAI-compatible) reads overlapping text chunks and produces structured flashcards (front / back / topic / difficulty) |
+| **Schedule** | Each card review is scored (again / hard / good / easy) and the SM-2 algorithm computes the next optimal review date |
+| **Study** | A WebSocket session streams due cards to the client in real time; the server records every review and updates the session counters |
+| **Measure** | Per-topic mastery scores are derived from review history on demand |
+
+**Key capabilities:**
+
+- Full user authentication with JWT access + refresh tokens and bcrypt-hashed passwords
+- Course-scoped resource ownership (every object belongs to a user + course)
+- Redis caching of LLM results (24h TTL, keyed by SHA-256 of content)
+- Configurable CORS, rate limits, and LLM parameters via environment variables
+- Auto-generated OpenAPI docs at `/api/docs` (Swagger UI) and `/api/redoc`
 
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| **Web framework** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ with async lifespan |
-| **ASGI server** | [Uvicorn](https://www.uvicorn.org/) with standard extras |
-| **Database** | PostgreSQL 15 via [asyncpg](https://github.com/MagicStack/asyncpg) |
-| **ORM** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (async) |
-| **Migrations** | [Alembic](https://alembic.sqlalchemy.org/) |
-| **Cache / Broker** | [Redis](https://redis.io/) 7 |
-| **AI Provider** | NVIDIA NIM (`openai/gpt-oss-120b`) via OpenAI-compatible SDK |
-| **PDF Parsing** | [PyMuPDF](https://pymupdf.readthedocs.io/) (fitz) |
-| **Auth** | [python-jose](https://python-jose.readthedocs.io/) (JWT) + [passlib](https://passlib.readthedocs.io/) (bcrypt) |
-| **Validation** | [Pydantic v2](https://docs.pydantic.dev/) + pydantic-settings |
-| **Containerisation** | Docker (multi-stage) + Docker Compose |
-| **Language** | Python 3.11+ |
-
----
-
-## Architecture Overview
+# Architecture
 
 ```mermaid
 graph TB
@@ -137,7 +130,106 @@ graph TB
 
 ---
 
-## Directory Structure
+# Data Flow / Processing Pipeline
+
+## Content Ingestion and AI Generation
+
+```mermaid
+flowchart LR
+    Upload["📄 File Upload\n(PDF / Text)"] --> Dedup["SHA-256\nDeduplication"]
+    Dedup --> Store["Local\nStorage"]
+    Store --> Parse["File Parser\n(PyMuPDF / text)"]
+    Parse --> Chunk["Text Chunker\n1500-char windows"]
+    Chunk --> Cache{"Redis\nCache?"}
+    Cache -- Hit --> Cards["FlashcardData[]"]
+    Cache -- Miss --> LLM["NVIDIA NIM\nLLM (streaming)"]
+    LLM --> Parse2["JSON\nParser"]
+    Parse2 --> CacheWrite["Cache SET\nTTL 24h"]
+    CacheWrite --> Cards
+    Cards --> DB["PostgreSQL\n(INSERT flashcards)"]
+```
+
+## Study Session Flow
+
+```mermaid
+flowchart LR
+    Start["POST /sessions\n(open session)"] --> Load["Load due cards\nfor course"]
+    Load --> WS["WebSocket\nconnect"]
+    WS --> Send["Server sends\nWSCardEvent"]
+    Send --> Review["Client submits\nWSReviewEvent\n(rating 0–3)"]
+    Review --> SM2["SM-2\nScheduler"]
+    SM2 --> Save["Persist\nCardReview +\nnext_review_at"]
+    Save --> More{"More\ncards?"}
+    More -- Yes --> Send
+    More -- No --> Close["Close session\nupdate counters"]
+```
+
+## REST Request Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant MW as CORS + Bearer Guard
+    participant R as Router
+    participant S as Service
+    participant DB as PostgreSQL
+    participant EH as Exception Handler
+
+    C->>MW: HTTP Request + Bearer Token
+    MW->>MW: Decode JWT → User
+    MW->>R: Validated User + Request Body
+    R->>S: Call service method
+    S->>DB: Async query (AsyncSession)
+    DB-->>S: ORM result
+    S-->>R: Pydantic Response model
+    R-->>C: 200/201 JSON
+
+    note over S,EH: On domain exception
+    S--xEH: Raise StudyOSException subclass
+    EH-->>C: Mapped HTTP error (4xx/5xx)
+```
+
+## AI Flashcard Generation (Detailed)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant FS as FlashcardService
+    participant CS as ContentService
+    participant ST as LocalStorage
+    participant CH as TextChunker
+    participant LLM as LLMClient
+    participant RC as RedisCache
+    participant NV as NVIDIA NIM API
+    participant DB as PostgreSQL
+
+    C->>FS: POST /flashcards/generate {content_source_id}
+    FS->>CS: get_chunks(content_source_id)
+    CS->>DB: Fetch ContentSource row
+    CS->>ST: Load raw file bytes
+    CS->>CH: parse_file() → extract text
+    CH-->>CS: Plain text string
+    CS->>CH: chunk(text) → 1500-char windows
+    CH-->>CS: []string chunks
+    CS-->>FS: chunks[]
+    FS->>LLM: generate_flashcards(chunks, course_title)
+    LLM->>RC: GET cache_key (SHA-256 of content)
+    alt Cache hit
+        RC-->>LLM: Cached FlashcardData[]
+    else Cache miss
+        LLM->>NV: Stream chat completion
+        NV-->>LLM: JSON array (streamed)
+        LLM->>LLM: Parse JSON → FlashcardData[]
+        LLM->>RC: SET cache_key TTL=24h
+    end
+    LLM-->>FS: FlashcardData[]
+    FS->>DB: INSERT flashcards (origin=ai)
+    FS-->>C: FlashcardResponse[]
+```
+
+---
+
+# Project Structure
 
 ```
 studyos-backend/
@@ -208,7 +300,65 @@ Each API sub-package follows the same structure:
 
 ---
 
-## Domain Model (ERD)
+# Design Decisions
+
+## Async-First Architecture
+
+FastAPI with `asyncpg` and SQLAlchemy 2.0 async was chosen to maximise I/O concurrency without the operational cost of a message queue. All database queries, file reads, and LLM calls are awaited on the same event loop, keeping the thread pool free for CPU-bound work.
+
+| Decision | Rationale | Tradeoff |
+|---|---|---|
+| **Async SQLAlchemy + asyncpg** | Non-blocking DB I/O; handles burst traffic on a single process | Slightly more complex session management than synchronous ORM |
+| **NVIDIA NIM via OpenAI SDK** | Drop-in compatibility with the OpenAI client; swap models by changing `OPENAI_MODEL` env var | Vendor dependency; requires valid API key |
+| **Redis caching for LLM results** | Identical document + title combinations re-use cached flashcards; eliminates redundant API cost | Cache invalidation is manual; staleness possible if prompts change |
+| **SM-2 as a pure stateless function** | No background scheduler needed; next review date computed inline at review time | Requires querying review history to reconstruct state |
+| **Domain exception hierarchy** | Routers never catch exceptions; a single registry maps each type to HTTP status | Slightly more boilerplate than throwing `HTTPException` directly |
+| **Multi-stage Docker build** | Runtime image excludes build tools; smaller attack surface and image size | Slightly more complex Dockerfile |
+
+## Scalability Considerations
+
+- **Horizontal scaling** — the API is stateless (JWT auth, no server-side sessions); multiple API instances can run behind a load balancer sharing the same PostgreSQL and Redis.
+- **Connection pooling** — `DATABASE_POOL_SIZE` (default 10) and `DATABASE_MAX_OVERFLOW` (default 20) are tunable per instance.
+- **LLM cost control** — Redis cache with a 24h TTL prevents redundant calls for the same content. `AI_MAX_CHUNKS_PER_REQUEST` limits tokens per request.
+- **File storage** — the current `LocalStorage` implementation writes to disk; replacing it with an S3-compatible adapter (matching the `FileStorage` ABC) requires no changes to the service layer.
+
+---
+
+# Design Patterns Used
+
+| Pattern | Where | Description |
+|---|---|---|
+| **Service Layer** | `app/services/`, `app/api/*/service.py` | All business logic lives in service classes. Routers are thin — they validate input, call a service method, and return the result. |
+| **Repository / Abstract Interface** | `app/services/ai/base.py`, `app/services/cache/base.py`, `app/services/srs/base.py`, `app/services/storage/base.py` | Each infrastructure concern (LLM, cache, SRS algorithm, file storage) is hidden behind an Abstract Base Class. Concrete implementations are swappable without touching service code. |
+| **Dependency Injection** | `app/api/deps.py`, FastAPI `Depends()` | Authentication, database sessions, and service instances are injected into route handlers via FastAPI's `Depends()` mechanism. |
+| **Pipeline Pattern** | Content ingestion → chunking → LLM generation → persist | File upload triggers a sequential chain: parse → chunk → cache-or-LLM → insert. Each step transforms a data structure and passes it to the next. |
+| **Adapter Pattern** | `LLMClient` wrapping `AsyncOpenAI` | The NVIDIA NIM endpoint is accessed through the standard OpenAI Python SDK, adapting a third-party interface to the internal `AIClient` ABC. |
+| **Domain Exception Hierarchy** | `app/core/exceptions.py` + `exception_handlers.py` | A tree of typed domain exceptions is caught at the framework boundary and translated to HTTP responses. Services raise domain exceptions; routers never see `HTTPException`. |
+
+---
+
+# Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Web framework** | [FastAPI](https://fastapi.tiangolo.com/) 0.115+ with async lifespan |
+| **ASGI server** | [Uvicorn](https://www.uvicorn.org/) with standard extras |
+| **Database** | PostgreSQL 15 via [asyncpg](https://github.com/MagicStack/asyncpg) |
+| **ORM** | [SQLAlchemy](https://www.sqlalchemy.org/) 2.0 (async) |
+| **Migrations** | [Alembic](https://alembic.sqlalchemy.org/) |
+| **Cache / Broker** | [Redis](https://redis.io/) 7 |
+| **AI Provider** | NVIDIA NIM (`openai/gpt-oss-120b`) via OpenAI-compatible SDK |
+| **PDF Parsing** | [PyMuPDF](https://pymupdf.readthedocs.io/) (fitz) |
+| **Auth** | [python-jose](https://python-jose.readthedocs.io/) (JWT) + [passlib](https://passlib.readthedocs.io/) (bcrypt) |
+| **Validation** | [Pydantic v2](https://docs.pydantic.dev/) + pydantic-settings |
+| **Containerisation** | Docker (multi-stage) + Docker Compose |
+| **Code Quality** | Ruff (lint + format) + mypy (type checking) |
+| **Testing** | pytest + pytest-asyncio + httpx |
+| **Language** | Python 3.11+ |
+
+---
+
+# Domain Model (ERD)
 
 ```mermaid
 erDiagram
@@ -315,7 +465,7 @@ erDiagram
 
 ---
 
-## API Reference
+# API Reference
 
 All routes are served under the `/api/v1` prefix. Interactive docs are available at `/api/docs`.
 
@@ -382,129 +532,7 @@ All routes are served under the `/api/v1` prefix. Interactive docs are available
 
 ---
 
-## Request / Response Flow
-
-### REST Request Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant MW as CORS + Bearer Guard
-    participant R as Router
-    participant S as Service
-    participant DB as PostgreSQL
-    participant EH as Exception Handler
-
-    C->>MW: HTTP Request + Bearer Token
-    MW->>MW: Decode JWT → User
-    MW->>R: Validated User + Request Body
-    R->>S: Call service method
-    S->>DB: Async query (AsyncSession)
-    DB-->>S: ORM result
-    S-->>R: Pydantic Response model
-    R-->>C: 200/201 JSON
-
-    note over S,EH: On domain exception
-    S--xEH: Raise StudyOSException subclass
-    EH-->>C: Mapped HTTP error (4xx/5xx)
-```
-
-### AI Flashcard Generation Flow
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant FS as FlashcardService
-    participant CS as ContentService
-    participant ST as LocalStorage
-    participant CH as TextChunker
-    participant LLM as LLMClient
-    participant RC as RedisCache
-    participant NV as NVIDIA NIM API
-    participant DB as PostgreSQL
-
-    C->>FS: POST /flashcards/generate {content_source_id}
-    FS->>CS: get_chunks(content_source_id)
-    CS->>DB: Fetch ContentSource row
-    CS->>ST: Load raw file bytes
-    CS->>CH: parse_file() → extract text
-    CH-->>CS: Plain text string
-    CS->>CH: chunk(text) → 1500-char windows
-    CH-->>CS: []string chunks
-    CS-->>FS: chunks[]
-    FS->>LLM: generate_flashcards(chunks, course_title)
-    LLM->>RC: GET cache_key (SHA-256 of content)
-    alt Cache hit
-        RC-->>LLM: Cached FlashcardData[]
-    else Cache miss
-        LLM->>NV: Stream chat completion
-        NV-->>LLM: JSON array (streamed)
-        LLM->>LLM: Parse JSON → FlashcardData[]
-        LLM->>RC: SET cache_key TTL=24h
-    end
-    LLM-->>FS: FlashcardData[]
-    FS->>DB: INSERT flashcards (origin=ai)
-    FS-->>C: FlashcardResponse[]
-```
-
----
-
-## AI Pipeline
-
-The AI pipeline is built around two abstract interfaces and a single concrete implementation:
-
-```mermaid
-classDiagram
-    class AIClient {
-        <<abstract>>
-        +generate_flashcards(chunks, course_title) FlashcardData[]
-    }
-
-    class LLMClient {
-        -cache: CacheClient
-        -client: AsyncOpenAI
-        +generate_flashcards(chunks, course_title) FlashcardData[]
-        -_call_llm(chunks, course_title) FlashcardData[]
-        -_stream_response(user_prompt) str
-        -_parse_response(raw) FlashcardData[]
-        -_build_cache_key(chunks, title) str
-    }
-
-    class CacheClient {
-        <<abstract>>
-        +get(key) Any
-        +set(key, value, ttl) None
-        +delete(key) None
-    }
-
-    class RedisCache {
-        -redis: Redis
-        +get(key) Any
-        +set(key, value, ttl) None
-        +delete(key) None
-    }
-
-    class FlashcardData {
-        +front: str
-        +back: str
-        +topic: str
-        +difficulty: int
-    }
-
-    AIClient <|-- LLMClient
-    CacheClient <|-- RedisCache
-    LLMClient --> CacheClient
-    LLMClient ..> FlashcardData : produces
-```
-
-**Prompt strategy:**
-- **System prompt** — instructs the model to act as an expert educator and return a strictly-typed JSON array.
-- **User prompt** — passes `course_title` for domain context and up to `AI_MAX_CHUNKS_PER_REQUEST` (default 20) text chunks.
-- **Cache key** — deterministic SHA-256 of `course_title + all_chunks`; results are cached for `AI_CACHE_TTL_SECONDS` (default 24 h).
-
----
-
-## Spaced Repetition (SM-2)
+# Spaced Repetition (SM-2)
 
 StudyOS implements the classic [SuperMemo SM-2 algorithm](https://www.supermemo.com/en/archives1990-2015/english/ol/sm2) as a **pure, stateless** function. All mutable state lives in `card_reviews` rows.
 
@@ -550,7 +578,7 @@ The minimum ease factor is clamped at `SM2_MIN_EASE_FACTOR` (default `1.3`); ini
 
 ---
 
-## WebSocket Study Session
+# WebSocket Study Session
 
 The `/api/v1/sessions/{session_id}` WebSocket endpoint drives a full interactive review loop server-side.
 
@@ -603,7 +631,7 @@ sequenceDiagram
 
 ---
 
-## Security Model
+# Security Model
 
 ```mermaid
 flowchart LR
@@ -633,7 +661,7 @@ flowchart LR
 
 ---
 
-## Configuration Reference
+# Configuration Reference
 
 All settings are read from a `.env` file (or real environment variables). Create a `.env` file by copying the table below:
 
@@ -666,7 +694,7 @@ All settings are read from a `.env` file (or real environment variables). Create
 
 ---
 
-## Database Migrations
+# Database Migrations
 
 Migrations are managed with **Alembic** and run against the async `asyncpg` driver.
 
@@ -693,9 +721,13 @@ graph LR
 
 ---
 
-## Docker & Deployment
+# Installation
 
-### Services
+## Option A — Docker Compose (Recommended)
+
+Docker Compose starts the full stack (API, PostgreSQL, Redis) and runs migrations automatically via a dedicated `migrate` service.
+
+### Stack Layout
 
 ```mermaid
 graph TD
@@ -714,20 +746,6 @@ graph TD
     MIGRATE -.->|depends_on healthy| PG
 ```
 
-### Quick Start
-
-```bash
-# 1. Clone and create environment file
-cp .env.example .env   # fill in APP_SECRET_KEY and NVIDIA_API_KEY
-
-# 2. Build and start the full stack
-docker compose up --build
-
-# 3. Run migrations (handled automatically by the 'migrate' service)
-# The API will be available at http://localhost:8000
-# Swagger UI: http://localhost:8000/api/docs
-```
-
 ### Dockerfile — Multi-Stage Build
 
 | Stage | Base | Purpose |
@@ -735,42 +753,47 @@ docker compose up --build
 | `builder` | `python:3.11-slim` | Install all dependencies (including dev) into `/opt/venv` |
 | `runtime` | `python:3.11-slim` | Copy venv + application source only; run as `appuser` |
 
-The two-stage build keeps the final image lean by excluding build tools (`build-essential`, `libpq-dev`) from the runtime layer.
+The two-stage build excludes build tools (`build-essential`, `libpq-dev`) from the runtime layer, keeping the image lean and reducing the attack surface.
 
----
+```bash
+# 1. Copy and populate the environment file
+cp .env.example .env   # fill in APP_SECRET_KEY and NVIDIA_API_KEY at minimum
 
-## Development Setup
+# 2. Build and start the full stack (migrations run automatically)
+docker compose up --build
+
+# API:        http://localhost:8000
+# Swagger UI: http://localhost:8000/api/docs
+# ReDoc:      http://localhost:8000/api/redoc
+```
+
+## Option B — Local Development
 
 ### Prerequisites
 
 - Python 3.11+
 - PostgreSQL 15
 - Redis 7
-- (Optional) Docker + Docker Compose
-
-### Local Installation
 
 ```bash
-# Create and activate a virtual environment
+# 1. Create and activate a virtual environment
 python -m venv .venv
 source .venv/bin/activate
 
-# Install all dependencies including dev extras
+# 2. Install all dependencies including dev extras
 pip install -e ".[dev]"
 
-# Copy and populate the environment file
+# 3. Copy and populate the environment file
 cp .env.example .env
 
-# Run database migrations
+# 4. Apply database migrations
 alembic upgrade head
 
-# Start the development server with hot-reload
+# 5. Start the development server with hot-reload
 uvicorn app.main:app --reload --port 8000
 ```
 
 ### Code Quality
-
-The project uses **Ruff** for linting and formatting, and **mypy** for static type checking:
 
 ```bash
 # Lint
@@ -785,7 +808,75 @@ mypy app/
 
 ---
 
-## Error Handling Strategy
+# Usage
+
+Once the server is running at `http://localhost:8000`:
+
+- **Interactive API docs (Swagger UI):** `http://localhost:8000/api/docs`
+- **ReDoc:** `http://localhost:8000/api/redoc`
+
+### Typical Workflow
+
+```bash
+# 1. Register a user
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "secret", "full_name": "Ada Lovelace"}'
+
+# 2. Login to receive tokens
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "secret"}'
+# → {"access_token": "...", "refresh_token": "..."}
+
+# 3. Create a course (use the access_token from step 2)
+curl -X POST http://localhost:8000/api/v1/courses \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Cell Biology", "description": "Intro course"}'
+# → {"id": "<course_id>", ...}
+
+# 4. Upload a study document
+curl -X POST http://localhost:8000/api/v1/content/upload \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@notes.pdf" \
+  -F "course_id=<course_id>"
+# → {"id": "<content_source_id>", ...}
+
+# 5. Generate AI flashcards from the uploaded content
+curl -X POST http://localhost:8000/api/v1/flashcards/generate \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content_source_id": "<content_source_id>"}'
+
+# 6. Open a study session
+curl -X POST http://localhost:8000/api/v1/sessions \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"course_id": "<course_id>"}'
+# → {"id": "<session_id>", ...}
+
+# 7. Connect to the WebSocket session for live card review
+# ws://localhost:8000/api/v1/sessions/<session_id>
+# Server sends: {"flashcard_id": "...", "front": "...", "back": "...", "topic": "..."}
+# Client replies: {"rating": 2}   (0=Again, 1=Hard, 2=Good, 3=Easy)
+
+# 8. Check mastery scores per topic
+curl http://localhost:8000/api/v1/mastery?course_id=<course_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### Token Refresh
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "<refresh_token>"}'
+```
+
+---
+
+# Error Handling
 
 All business errors inherit from `StudyOSException`. Services **only** raise domain exceptions — never `HTTPException`. The global exception handler registry in `exception_handlers.py` maps each exception type to the correct HTTP status code.
 
@@ -849,7 +940,7 @@ classDiagram
 
 ---
 
-## Testing
+# Testing
 
 The project uses **pytest** with `pytest-asyncio` for async test support and `httpx` for test client requests.
 
@@ -874,6 +965,21 @@ tests/
 ├── unit/           # Pure logic tests (SM-2, chunker, parsers, etc.)
 └── integration/    # Tests against a real (test) database and Redis
 ```
+
+---
+
+# Future Improvements
+
+| Area | Improvement |
+|---|---|
+| **Storage** | Replace `LocalStorage` with an S3-compatible adapter (the `FileStorage` ABC makes this a drop-in swap) |
+| **Background tasks** | Move AI generation to a background task queue (e.g., Celery + Redis) to avoid blocking the request during large document processing |
+| **Auth** | Add OAuth2 / social login providers; support multi-tenancy with organisation-scoped roles |
+| **Notifications** | Push reminders when cards are due via email or WebSocket broadcast |
+| **Observability** | Add structured logging (structlog), distributed tracing (OpenTelemetry), and metrics (Prometheus) |
+| **Rate limiting** | Add per-user rate limiting on the AI generation endpoint to control API costs |
+| **Frontend** | Build a React/Next.js client that connects to the WebSocket session for a full browser-based study experience |
+| **LLM flexibility** | Extend the `AIClient` ABC with a multi-provider registry to support OpenAI, Anthropic, or local models without service-layer changes |
 
 ---
 
